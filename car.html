@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="X-UA-Compatible" content="ie=edge" />
+
+    <title>Project: Car</title>
+    <canvas id="webglcanvas" width="900" height="900"></canvas>
+    <script type="text/javascript" src="jquery-2.1.1.js"></script>
+    <script type="text/javascript">
+      var vertexShaderSource = `
+        attribute vec3 a_coords;
+        attribute vec3 a_colors;
+        attribute vec3 a_normal;
+
+        uniform mat4 u_T;
+        uniform mat4 u_Rx;
+        uniform mat4 u_Ry;
+
+        uniform mat4 u_Basis;
+        uniform mat4 u_Eye;
+
+        uniform mat4 u_Pers;
+
+        varying vec3 v_normal;
+        varying vec3 v_coords;
+        varying vec3 v_color;
+
+        void main() {
+
+          mat4 M = u_T*u_Ry*u_Rx;
+          mat4 V = u_Basis*u_Eye;
+          mat4 P = u_Pers;
+          mat4 MVP = P*V*M;
+
+          gl_Position = MVP*vec4(a_coords, 1.0);
+          vec3 eyeNorm = mat3(V*M) * a_normal;
+          v_normal = normalize(eyeNorm);
+          v_color = a_colors;
+          v_coords = a_coords;
+        }`;
+
+      var fragmentShaderSource = `precision mediump float;
+        uniform vec3 u_LightColor;
+        uniform vec3 u_LightPosition;
+        uniform vec3 u_AmbientLight;
+
+        varying vec3 v_normal;
+        varying vec3 v_coords;
+        varying vec3 v_color;
+
+        void main() {
+          vec3 normal = normalize(v_normal);
+          vec3 lightDirection = normalize(u_LightPosition - v_coords);
+          float nDotL = max(dot(lightDirection, normal), 0.0);
+          vec3 diffuse = u_LightColor * v_color * nDotL;
+          vec3 ambient = u_AmbientLight * v_color;
+
+          gl_FragColor = vec4(diffuse + ambient, 1.0);
+        }`;
+
+      var gl;
+      var a_coords_location;
+      var a_coords_buffer;
+      var a_colors_location;
+      var a_colors_buffer;
+      var a_normal_location;
+      var a_normal_buffer;
+      var vertexCount; // = 230946;
+
+      var bufferInd;
+
+      var u_matrix_trans_location;
+      var u_matrix_rotateX_location;
+      var u_matrix_rotateY_location;
+      var u_matrix_basis_location;
+      var u_matrix_eye_location;
+      var u_matrix_perspective_location;
+
+      var u_LightColor_location;
+      var u_LightPosition_location;
+      var u_AmbientLight_location;
+
+      var thetaX = 0;
+      var thetaY = 30;
+
+      function vec3(vec1, vec2, vec3) {
+        return {
+          vec1: vec1,
+          vec2: vec2,
+          vec3: vec3
+        };
+      }
+
+      function loadMeshData(string) {
+        var lines = string.split("\n");
+        var positions = [];
+        var normals = [];
+        var vertices = [];
+        var normalsVertices = [];
+        for (var i = 0; i < lines.length; i++) {
+          var parts = lines[i].trimRight().split(" ");
+          if (parts.length > 0) {
+            switch (parts[0]) {
+              case "v":
+                positions.push(
+                  vec3(
+                    parseFloat(parts[1]),
+                    parseFloat(parts[2]),
+                    parseFloat(parts[3])
+                  )
+                );
+                break;
+              case "vn":
+                normals.push(
+                  vec3(
+                    parseFloat(parts[1]),
+                    parseFloat(parts[2]),
+                    parseFloat(parts[3])
+                  )
+                );
+                break;
+              case "f": {
+                var f1 = parts[1].split("/");
+                var f2 = parts[2].split("/");
+                var f3 = parts[3].split("/");
+                vertices.push(
+                  positions[parseInt(f1[0]) - 1].vec1,
+                  positions[parseInt(f1[0]) - 1].vec2,
+                  positions[parseInt(f1[0]) - 1].vec3
+                );
+                //Array.prototype.push.apply(vertices, positions[parseInt(f1[0]) - 1]);
+                normalsVertices.push(
+                  normals[parseInt(f1[2]) - 1].vec1,
+                  normals[parseInt(f1[2]) - 1].vec2,
+                  normals[parseInt(f1[2]) - 1].vec3
+                );
+                //Array.prototype.push.apply( normalsVertices,normals[parseInt(f1[2]) - 1]);
+                vertices.push(
+                  positions[parseInt(f2[0]) - 1].vec1,
+                  positions[parseInt(f2[0]) - 1].vec2,
+                  positions[parseInt(f2[0]) - 1].vec3
+                );
+                //Array.prototype.push.apply(vertices, positions[parseInt(f2[0]) - 1]);
+                normalsVertices.push(
+                  normals[parseInt(f2[2]) - 1].vec1,
+                  normals[parseInt(f2[2]) - 1].vec2,
+                  normals[parseInt(f2[2]) - 1].vec3
+                );
+                //Array.prototype.push.apply(normalsVertices,normals[parseInt(f2[2]) - 1]);
+                vertices.push(
+                  positions[parseInt(f3[0]) - 1].vec1,
+                  positions[parseInt(f3[0]) - 1].vec2,
+                  positions[parseInt(f3[0]) - 1].vec3
+                );
+                //Array.prototype.push.apply(vertices, positions[parseInt(f3[0]) - 1]);
+                normalsVertices.push(
+                  normals[parseInt(f3[2]) - 1].vec1,
+                  normals[parseInt(f3[2]) - 1].vec2,
+                  normals[parseInt(f3[2]) - 1].vec3
+                );
+                //Array.prototype.push.apply(normalsVertices,normals[parseInt(f3[2]) - 1]);
+                break;
+              }
+            }
+          }
+        }
+        //console.log(vertices);
+        var vertexCount = vertices.length / 9;
+        console.log("Loaded mesh with " + vertexCount + " vertices");
+        return {
+          //primitiveType: "TRIANGLES",
+          vertices: vertices,
+          normalsVertices: normalsVertices,
+          vertexCount: vertexCount
+        };
+      }
+
+      var coords;
+      var normals;
+
+      function loadMesh(filename) {
+        $.ajax({
+          url: filename,
+          dataType: "text"
+        })
+          .done(function(data) {
+            var abc = loadMeshData(data);
+            coords = new Float32Array(abc.vertices);
+            normals = new Float32Array(abc.normalsVertices);
+            vertexCount = abc.vertexCount;
+            //console.log(abc);
+            draw();
+          })
+          .fail(function() {
+            alert("Faild to retrieve [" + filename + "]");
+          });
+      }
+
+      function draw() {
+        gl.clearColor(1, 1, 1, 1);
+        gl.enable(gl.DEPTH_TEST);
+        gl.enable(gl.CULL_FACE);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+        var red = [1.0, 0.0, 0.0];
+        var green = [0.0, 1.0, 0.0];
+        var blue = [0.0, 0.0, 1.0];
+        var bodyBlue = [0.8, 0.2, 0.2]; //[0.09766, 0.203125, 0.4375];
+        var white = [1.0, 1.0, 1.0];
+        var black = [0.1, 0.1, 0.1];
+        var glass = [0.6588, 0.8, 0.8431];
+        var light = [0.6588, 0.8, 0.8431];
+        var nose = [0.5391, 0.5547, 0.5547];
+        var ash = [0.2, 0.2, 0.2];
+        var color = [];
+
+        var i = 0;
+        for (i = 0; i < 100144; i++) {
+          var c = bodyBlue; //body
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 4608; i++) {
+          var c = green;
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 132; i++) {
+          var c = white; //number plate
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 512; i++) {
+          var c = black; //back whole
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 1680; i++) {
+          var c = red; //back light
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 2016; i++) {
+          var c = glass; //glass
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 624; i++) {
+          var c = black; //back down
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 1792; i++) {
+          var c = glass;
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 232; i++) {
+          var c = ash; //under
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 472; i++) {
+          var c = white; //head Light
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 10022; i++) {
+          var c = bodyBlue; //front net
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 2752; i++) {
+          var c = green;
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 1408; i++) {
+          var c = bodyBlue; //front nosle
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 3264; i++) {
+          var c = black; //front nose
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 2880; i++) {
+          var c = white; //front nose
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 8320; i++) {
+          var c = ash; //
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 6144; i++) {
+          var c = white; //nothing
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 15872; i++) {
+          var c = white; //nothing
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 2544; i++) {
+          var c = white; //nothing
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 864; i++) {
+          var c = white; //nothing
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 2584; i++) {
+          var c = white; //nothing
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 128; i++) {
+          var c = white; //nothing
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 768; i++) {
+          var c = black; //trie
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 1120; i++) {
+          var c = black; //nut
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 13600; i++) {
+          var c = white; //ring
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 768; i++) {
+          var c = black; //trie
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 1120; i++) {
+          var c = black; //nut
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 13600; i++) {
+          var c = white; //ring
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 768; i++) {
+          var c = black; //trie
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 1120; i++) {
+          var c = black; //nut
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 13600; i++) {
+          var c = white; //ring
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 768; i++) {
+          var c = black; //trie
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 1120; i++) {
+          var c = black; //nut
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+        for (i = 0; i < 13600; i++) {
+          var c = white; //ring
+          color.push(c[0], c[1], c[2], c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+
+        var colors = new Float32Array(color);
+
+        var tx = 0.0;
+        var ty = 0.0;
+        var tz = -8.0;
+        var transMat = new Float32Array([
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          tx,
+          ty,
+          tz,
+          1.0
+        ]);
+
+        var rad = (thetaX * Math.PI) / 180;
+        var rotateMatX = new Float32Array([
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          Math.cos(rad),
+          Math.sin(rad),
+          0.0,
+          0.0,
+          -Math.sin(rad),
+          Math.cos(rad),
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]);
+
+        var rad = (thetaY * Math.PI) / 180;
+        var rotateMatY = new Float32Array([
+          Math.cos(rad),
+          0.0,
+          -Math.sin(rad),
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          Math.sin(rad),
+          0.0,
+          Math.cos(rad),
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]);
+
+        var xu, xv, xw, yu, yv, yw, zu, zv, zw;
+        xu = 1;
+        xv = 0;
+        xw = 0;
+        yu = 0;
+        yv = 1;
+        yw = 0;
+        zu = 0;
+        zv = 0;
+        zw = 1;
+        var basisMat = new Float32Array([
+          xu,
+          xv,
+          xw,
+          0,
+          yu,
+          yv,
+          yw,
+          0,
+          zu,
+          zv,
+          zw,
+          0,
+          0,
+          0,
+          0,
+          1
+        ]);
+
+        var xe, ye, ze;
+        xe = 0.0;
+        ye = 1.0;
+        ze = 2.0;
+        var eyeMat = new Float32Array([
+          1,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          -xe,
+          -ye,
+          -ze,
+          1
+        ]);
+
+        var aspect = 1.0;
+        var fov = 45;
+        var far = 100;
+        var near = 2;
+
+        var pa = 1.0 / (aspect * Math.tan(((fov / 2) * Math.PI) / 180));
+        var pb = 1.0 / Math.tan(((fov / 2) * Math.PI) / 180);
+        var pc = -(far + near) / (far - near);
+        var pd = -(2.0 * far * near) / (far - near);
+
+        var persMat = new Float32Array([
+          pa,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          pb,
+          0,
+          0.0,
+          0.0,
+          0.0,
+          pc,
+          -1.0,
+          0.0,
+          0.0,
+          pd,
+          0.0
+        ]);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, a_coords_buffer);
+        gl.bufferData(gl.ARRAY_BUFFER, coords, gl.STATIC_DRAW);
+        gl.vertexAttribPointer(a_coords_location, 3, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(a_coords_location);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, a_colors_buffer);
+        gl.bufferData(gl.ARRAY_BUFFER, colors, gl.STATIC_DRAW);
+        gl.vertexAttribPointer(a_colors_location, 3, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(a_colors_location);
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, a_normal_buffer);
+        gl.bufferData(gl.ARRAY_BUFFER, normals, gl.STATIC_DRAW);
+        gl.vertexAttribPointer(a_normal_location, 3, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(a_normal_location);
+
+        //gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, bufferInd);
+        //gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+
+        gl.uniformMatrix4fv(u_matrix_trans_location, false, transMat);
+        gl.uniformMatrix4fv(u_matrix_rotateX_location, false, rotateMatX);
+        gl.uniformMatrix4fv(u_matrix_rotateY_location, false, rotateMatY);
+        gl.uniformMatrix4fv(u_matrix_basis_location, false, basisMat);
+        gl.uniformMatrix4fv(u_matrix_eye_location, false, eyeMat);
+        gl.uniformMatrix4fv(u_matrix_perspective_location, false, persMat);
+
+        gl.uniform3f(u_LightColor_location, 1.0, 1.0, 1.0);
+        gl.uniform3f(u_LightPosition_location, 4.0, 4.0, 10.0);
+        gl.uniform3f(u_AmbientLight_location, 0.2, 0.2, 0.2);
+
+        gl.drawArrays(gl.TRIANGLES, 0, 3 * vertexCount);
+        //gl.drawElements(gl.TRIANGLES, 3*12, gl.UNSIGNED_BYTE, 0);
+      }
+
+      function createProgram(gl, vertexShaderSource, fragmentShaderSource) {
+        var vsh = gl.createShader(gl.VERTEX_SHADER);
+        gl.shaderSource(vsh, vertexShaderSource);
+        gl.compileShader(vsh);
+
+        var fsh = gl.createShader(gl.FRAGMENT_SHADER);
+        gl.shaderSource(fsh, fragmentShaderSource);
+        gl.compileShader(fsh);
+
+        var prog = gl.createProgram();
+        gl.attachShader(prog, vsh);
+        gl.attachShader(prog, fsh);
+        gl.linkProgram(prog);
+
+        return prog;
+      }
+
+      function initGL() {
+        var prog = createProgram(gl, vertexShaderSource, fragmentShaderSource);
+        gl.useProgram(prog);
+
+        a_coords_location = gl.getAttribLocation(prog, "a_coords");
+        a_coords_buffer = gl.createBuffer();
+
+        a_colors_location = gl.getAttribLocation(prog, "a_colors");
+        a_colors_buffer = gl.createBuffer();
+
+        a_normal_location = gl.getAttribLocation(prog, "a_normal");
+        a_normal_buffer = gl.createBuffer();
+
+        //bufferInd = gl.createBuffer();
+
+        u_matrix_trans_location = gl.getUniformLocation(prog, "u_T");
+        u_matrix_rotateX_location = gl.getUniformLocation(prog, "u_Rx");
+        u_matrix_rotateY_location = gl.getUniformLocation(prog, "u_Ry");
+        u_matrix_basis_location = gl.getUniformLocation(prog, "u_Basis");
+        u_matrix_eye_location = gl.getUniformLocation(prog, "u_Eye");
+        u_matrix_perspective_location = gl.getUniformLocation(prog, "u_Pers");
+
+        u_LightColor_location = gl.getUniformLocation(prog, "u_LightColor");
+        u_LightPosition_location = gl.getUniformLocation(
+          prog,
+          "u_LightPosition"
+        );
+        u_AmbientLight_location = gl.getUniformLocation(prog, "u_AmbientLight");
+      }
+
+      function click() {
+        gl.clearColor(1, 1, 1, 1); // glClear will fill the canvas with a new color
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+        thetaY += 2.0;
+
+        if (thetaY >= 360) {
+          thetaY = 0.0;
+        }
+
+        var rad = (thetaY * Math.PI) / 180;
+        var rotateMatY = new Float32Array([
+          Math.cos(rad),
+          0.0,
+          -Math.sin(rad),
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          Math.sin(rad),
+          0.0,
+          Math.cos(rad),
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]);
+
+        gl.uniformMatrix4fv(u_matrix_rotateY_location, false, rotateMatY);
+        gl.drawArrays(gl.TRIANGLES, 0, 3 * vertexCount);
+      }
+
+      function rotateY(angle) {
+        gl.clearColor(1, 1, 1, 1); // glClear will fill the canvas with a new color
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+        thetaY += angle;
+
+        if (thetaY >= 360) {
+          thetaY = 0.0;
+        }
+
+        var rad = (thetaY * Math.PI) / 180;
+        var rotateMatY = new Float32Array([
+          Math.cos(rad),
+          0.0,
+          -Math.sin(rad),
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          Math.sin(rad),
+          0.0,
+          Math.cos(rad),
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]);
+
+        gl.uniformMatrix4fv(u_matrix_rotateY_location, false, rotateMatY);
+        gl.drawArrays(gl.TRIANGLES, 0, 3 * vertexCount);
+      }
+
+      function rotateX(angle) {
+        gl.clearColor(1, 1, 1, 1); // glClear will fill the canvas with a new color
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+        thetaX += angle;
+
+        if (thetaX >= 360) {
+          thetaX = 0.0;
+        }
+
+        var rad = (thetaX * Math.PI) / 180;
+        var rotateMatX = new Float32Array([
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          Math.cos(rad),
+          Math.sin(rad),
+          0.0,
+          0.0,
+          -Math.sin(rad),
+          Math.cos(rad),
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]);
+
+        gl.uniformMatrix4fv(u_matrix_rotateX_location, false, rotateMatX);
+        gl.drawArrays(gl.TRIANGLES, 0, 3 * vertexCount);
+      }
+
+      function init() {
+        var canvas = document.getElementById("webglcanvas");
+        gl = canvas.getContext("webgl");
+        initGL();
+        $(document).ready(function() {
+          loadMesh("./car.obj");
+          //console.log("file load");
+        });
+        //draw();
+        //console.log("draw");
+        //canvas.addEventListener("keydown", keyRotate);
+        document.body.addEventListener("keydown", keyRotate);
+        canvas.onmousedown = function(ev) {
+          click();
+        };
+      }
+
+      function keyRotate(gl) {
+        var char = gl.char || gl.charCode || gl.which;
+        let key = String.fromCharCode(char);
+        if (key == "D") {
+          rotateY(2);
+        } else if (key == "A") {
+          rotateY(-2);
+        } else if (key == "W") {
+          rotateX(2);
+        } else if (key == "S") {
+          rotateX(-2);
+        }
+      }
+      init();
+    </script>
+  </head>
+  <body></body>
+</html>
